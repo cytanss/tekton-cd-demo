@@ -1,0 +1,20 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/pipelines.minVersion: 0.12.1
+  name: echo
+  labels:
+    app.kubernetes.io/version: '0.1'
+    operator.tekton.dev/provider-type: community
+spec:
+  params:
+    - default: "Hello World"
+      name: MESSAGE
+      type: string
+  steps:
+    - image: 'registry.access.redhat.com/ubi8/ubi-minimal:latest'
+      name: echo
+      args:
+        - echo
+        - $(params.MESSAGE)

@@ -21,7 +21,7 @@ err() {
 
 while (( "$#" )); do
   case "$1" in
-    install|uninstall|start|promote)
+    install|uninstall|start)
       COMMAND=$1
       shift
       ;;
@@ -58,7 +58,6 @@ command.help() {
       install                        Sets up the demo and creates namespaces
       uninstall                      Deletes the demo
       start                          Starts the deploy DEV pipeline
-      promote                        Starts the deploy STAGE pipeline
       help                           Help about this command
 
   OPTIONS:
@@ -86,24 +85,47 @@ command.install() {
   oc policy add-role-to-user edit system:serviceaccount:$stage_prj:default -n $dev_prj
 
   info "Deploying CI/CD infra to $cicd_prj namespace"
-  oc apply -f cd -n $cicd_prj
+  oc apply -f infra -n $cicd_prj
   GOGS_HOSTNAME=$(oc get route gogs -o template --template='{{.spec.host}}' -n $cicd_prj)
 
   info "Deploying pipeline and tasks to $cicd_prj namespace"
   oc apply -f tasks -n $cicd_prj
-  oc create -f config/maven-settings-configmap.yaml -n $cicd_prj
-  oc apply -f config/pipeline-pvc.yaml -n $cicd_prj
-  sed "s/demo-dev/$dev_prj/g" pipelines/pipeline-deploy-dev.yaml | sed -E "s#https://github.com/siamaksade#http://$GOGS_HOSTNAME/gogs#g" | oc apply -f - -n $cicd_prj
-  sed "s/demo-dev/$dev_prj/g" pipelines/pipeline-deploy-stage.yaml | sed -E "s/demo-stage/$stage_prj/g" | sed -E "s#https://github.com/siamaksade#http://$GOGS_HOSTNAME/gogs#g" | oc apply -f - -n $cicd_prj
+  oc apply -f pipelines/pipeline-build-pvc.yaml -n $cicd_prj
+  sed "s#https://github.com/siamaksade#http://$GOGS_HOSTNAME/gogs#g" pipelines/pipeline-build.yaml | oc apply -f - -n $cicd_prj
   
-  oc apply -f triggers/gogs-triggerbinding.yaml -n $cicd_prj
-  oc apply -f triggers/triggertemplate.yaml -n $cicd_prj
-  sed "s/demo-dev/$dev_prj/g" triggers/eventlistener.yaml | oc apply -f - -n $cicd_prj
+  oc apply -f triggers -n $cicd_prj
 
   info "Initiatlizing git repository in Gogs and configuring webhooks"
   sed "s/@HOSTNAME/$GOGS_HOSTNAME/g" config/gogs-configmap.yaml | oc create -f - -n $cicd_prj
   oc rollout status deployment/gogs -n $cicd_prj
   oc create -f config/gogs-init-taskrun.yaml -n $cicd_prj
+
+  info "Configure Argo CD"
+  cat << EOF > argo/tmp-argocd-app-patch.yaml
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dev-spring-petclinic
+spec:
+  destination:
+    namespace: $dev_prj
+  source:
+    repoURL: http://$GOGS_HOSTNAME/gogs/spring-petclinic-config
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: stage-spring-petclinic
+spec:
+  destination:
+    namespace: $stage_prj
+  source:
+    repoURL: http://$GOGS_HOSTNAME/gogs/spring-petclinic-config
+EOF
+  oc apply -k argo -n $cicd_prj
+  oc policy add-role-to-user admin system:serviceaccount:$cicd_prj:argocd-argocd-application-controller -n $dev_prj
+  oc policy add-role-to-user admin system:serviceaccount:$cicd_prj:argocd-argocd-application-controller -n $stage_prj
 
   oc project $cicd_prj
 
@@ -129,9 +151,9 @@ command.install() {
   You can find further details at:
   
   Gogs Git Server: http://$GOGS_HOSTNAME/explore/repos
-  Reports Server: http://$(oc get route reports-repo -o template --template='{{.spec.host}}' -n $cicd_prj)
   SonarQube: https://$(oc get route sonarqube -o template --template='{{.spec.host}}' -n $cicd_prj)
   Sonatype Nexus: http://$(oc get route nexus -o template --template='{{.spec.host}}' -n $cicd_prj)
+  Argo CD:  http://$(oc get route argocd-server -o template --template='{{.spec.host}}' -n $cicd_prj)  [user: admin pwd: $(oc get secret argocd-cluster -n $cicd_prj -ojsonpath='{.data.admin\.password}' | base64 -d)]
 
 ############################################################################
 ############################################################################
@@ -139,11 +161,7 @@ EOF
 }
 
 command.start() {
-  oc create -f runs/pipeline-deploy-dev-run.yaml -n $cicd_prj
-}
-
-command.promote() {
-  oc create -f runs/pipeline-deploy-stage-run.yaml -n $cicd_prj
+  oc create -f runs/pipeline-build-run.yaml -n $cicd_prj
 }
 
 command.uninstall() {

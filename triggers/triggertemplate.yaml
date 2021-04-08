@@ -25,13 +25,13 @@ spec:
   - apiVersion: tekton.dev/v1beta1
     kind: PipelineRun
     metadata:
-      generateName: petclinic-deploy-dev-
+      generateName: petclinic-build-
       # name: petclinic-dev-$(tt.params.gitbranchname)-$(tt.params.gitshortsha)
       labels:
-        tekton.dev/pipeline: petclinic-deploy-dev
+        tekton.dev/pipeline: petclinic-build
     spec:
       pipelineRef:
-        name: petclinic-deploy-dev
+        name: petclinic-build
       params:
         - name: APP_SOURCE_GIT
           value: $(tt.params.gitrepositoryurl)
@@ -45,4 +45,4 @@ spec:
           name: maven-settings
       - name: workspace
         persistentVolumeClaim:
-          claimName: petclinic-dev-workspace
+          claimName: petclinic-build-workspace
