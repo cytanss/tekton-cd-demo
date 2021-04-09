@@ -12,14 +12,10 @@ spec:
       type: string
       description: The application git revision
       default: master
-    - name: APP_CONFIG_GIT
+    - name: APP_MANIFESTS_GIT
       type: string
-      description: The application configuration git repository
+      description: The application manifests git repository
       default: https://github.com/siamaksade/spring-petclinic-config
-    - name: APP_TESTS_GIT
-      type: string
-      description: The application test cases git repository
-      default: https://github.com/siamaksade/spring-petclinic-gatling
     - name: APP_IMAGE_TAG
       type: string
       default: latest
@@ -118,37 +114,26 @@ spec:
     workspaces:
     - name: source
       workspace: workspace
-  - name: tests-clone
-    taskRef:
-      name: git-clone
-      kind: ClusterTask
-    workspaces:
-    - name: output
-      workspace: workspace
+  - name: update-deployment
     runAfter:
     - build-image
-    params:
-    - name: url
-      value: $(params.APP_TESTS_GIT)
-    - name: subdirectory
-      value: spring-petclinic-gatling
-    - name: deleteExisting
-      value: "true"
-  - name: sync-dev
     taskRef:
-      name: echo
-    runAfter:
-      - tests-clone
+      name: git-update-deployment
     params:
-    - name: MESSAGE
-      value: DEPLOY spring-petclinic
-  - name: int-test
-    taskRef:
-      name: openshift-client
-      kind: ClusterTask
-    runAfter:
-      - sync-dev
-    params:
-    - name: SCRIPT
-      value: |
-          sleep $(($RANDOM % 40 + 20))
+      - name: GIT_REPOSITORY
+        value: "$(params.APP_MANIFESTS_GIT)"
+      - name: GIT_USERNAME
+        value: gogs
+      - name: GIT_PASSWORD
+        value: gogs
+      - name: CURRENT_IMAGE
+        value: quay.io/siamaksade/spring-petclinic:latest
+      - name: NEW_IMAGE
+        value: image-registry.openshift-image-registry.svc:5000/$(context.pipelineRun.namespace)/spring-petclinic
+      - name: NEW_DIGEST
+        value: "$(tasks.build-image.results.IMAGE_DIGEST)"
+      - name: KUSTOMIZATION_PATH
+        value: environments/dev
+    workspaces:
+    - name: workspace
+      workspace: workspace
